@@ -119,6 +119,15 @@ func NewBoostService(opts BoostServiceOpts) (*BoostService, error) {
 		return nil, err
 	}
 
+	metricsServer, err := NewMetricsServer(
+		opts.PromPath,
+		opts.PromBindAddr,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
 	return &BoostService{
 		listenAddr:    opts.ListenAddr,
 		relays:        opts.Relays,
@@ -130,10 +139,7 @@ func NewBoostService(opts BoostServiceOpts) (*BoostService, error) {
 		bids:          make(map[bidRespKey]bidResp),
 		slotUID:       &slotUID{},
 
-		metrics: &Metrics{
-			path:     opts.PromPath,
-			bindAddr: opts.PromBindAddr,
-		},
+		metrics: metricsServer,
 
 		builderSigningDomain: builderSigningDomain,
 		httpClientGetHeader: http.Client{
