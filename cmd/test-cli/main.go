@@ -75,6 +75,10 @@ func doGetHeader(v validatorPrivateData, boostEndpoint string, beaconNode Beacon
 		log.WithError(err).WithField("currentBlockHash", currentBlockHash).Fatal("Could not get header")
 	}
 
+	if getHeaderResp.Capella == nil && getHeaderResp.Deneb == nil {
+		log.WithField("currentBlockHash", currentBlockHash).Fatal("header response empty")
+	}
+
 	if getHeaderResp.Capella.Message == nil {
 		log.Fatal("Did not receive correct header")
 	}

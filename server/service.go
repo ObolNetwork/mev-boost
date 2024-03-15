@@ -73,6 +73,9 @@ type BoostServiceOpts struct {
 	RelayCheck            bool
 	RelayMinBid           types.U256Str
 
+	PromPath     string
+	PromBindAddr string
+
 	RequestTimeoutGetHeader  time.Duration
 	RequestTimeoutGetPayload time.Duration
 	RequestTimeoutRegVal     time.Duration
@@ -89,6 +92,8 @@ type BoostService struct {
 	relayCheck    bool
 	relayMinBid   types.U256Str
 	genesisTime   uint64
+
+	metrics *Metrics
 
 	builderSigningDomain phase0.Domain
 	httpClientGetHeader  http.Client
@@ -124,6 +129,11 @@ func NewBoostService(opts BoostServiceOpts) (*BoostService, error) {
 		genesisTime:   opts.GenesisTime,
 		bids:          make(map[bidRespKey]bidResp),
 		slotUID:       &slotUID{},
+
+		metrics: &Metrics{
+			path:     opts.PromPath,
+			bindAddr: opts.PromBindAddr,
+		},
 
 		builderSigningDomain: builderSigningDomain,
 		httpClientGetHeader: http.Client{
@@ -180,6 +190,12 @@ func (m *BoostService) StartHTTPServer() error {
 	if m.srv != nil {
 		return errServerAlreadyRunning
 	}
+
+	go func() {
+		if err := m.metrics.Run(); err != nil {
+			m.log.WithError(err).Error("error running prometheus server")
+		}
+	}()
 
 	go m.startBidCacheCleanupTask()
 
@@ -283,6 +299,13 @@ func (m *BoostService) handleRegisterValidator(w http.ResponseWriter, req *http.
 
 	for _, relay := range m.relays {
 		go func(relay RelayEntry) {
+			t0 := time.Now()
+
+			defer func(t0 time.Time) {
+				elapsed := time.Since(t0)
+				m.metrics.registerValidatorTime.WithLabelValues(relay.String()).Observe(float64(elapsed))
+			}(t0)
+
 			url := relay.GetURI(pathRegisterValidator)
 			log := log.WithField("url", url)
 
@@ -290,6 +313,7 @@ func (m *BoostService) handleRegisterValidator(w http.ResponseWriter, req *http.
 			relayRespCh <- err
 			if err != nil {
 				log.WithError(err).Warn("error calling registerValidator on relay")
+				m.metrics.failedRegisterValidator.WithLabelValues(relay.String()).Inc()
 				return
 			}
 		}(relay)
@@ -375,6 +399,16 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 	for _, relay := range m.relays {
 		wg.Add(1)
 		go func(relay RelayEntry) {
+			t0 := time.Now()
+
+			defer func(t0 time.Time) {
+				elapsed := time.Since(t0)
+				m.metrics.getHeaderTime.WithLabelValues(
+					relay.String(),
+					pubkey,
+				).Observe(float64(elapsed))
+			}(t0)
+
 			defer wg.Done()
 			path := fmt.Sprintf("/eth/v1/builder/header/%s/%s/%s", slot, parentHashHex, pubkey)
 			url := relay.GetURI(path)
@@ -382,6 +416,7 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 			responsePayload := new(builderSpec.VersionedSignedBuilderBid)
 			code, err := SendHTTPRequest(context.Background(), m.httpClientGetHeader, http.MethodGet, url, ua, headers, nil, responsePayload)
 			if err != nil {
+				m.metrics.failedGetHeader.WithLabelValues(relay.String()).Inc()
 				log.WithError(err).Warn("error making request to relay")
 				return
 			}
@@ -580,6 +615,17 @@ func (m *BoostService) processCapellaPayload(w http.ResponseWriter, req *http.Re
 		wg.Add(1)
 		go func(relay RelayEntry) {
 			defer wg.Done()
+
+			t0 := time.Now()
+
+			defer func(t0 time.Time) {
+				elapsed := time.Since(t0)
+				m.metrics.getPayloadTime.WithLabelValues(
+					relay.String(),
+					"capella",
+				).Observe(float64(elapsed))
+			}(t0)
+
 			url := relay.GetURI(pathGetPayload)
 			log := log.WithField("url", url)
 			log.Debug("calling getPayload")
@@ -590,6 +636,7 @@ func (m *BoostService) processCapellaPayload(w http.ResponseWriter, req *http.Re
 				if errors.Is(requestCtx.Err(), context.Canceled) {
 					log.Info("request was cancelled") // this is expected, if payload has already been received by another relay
 				} else {
+					m.metrics.failedGetPayload.WithLabelValues(relay.String(), "capella").Inc()
 					log.WithError(err).Error("error making request to relay")
 				}
 				return
@@ -708,6 +755,17 @@ func (m *BoostService) processDenebPayload(w http.ResponseWriter, req *http.Requ
 		wg.Add(1)
 		go func(relay RelayEntry) {
 			defer wg.Done()
+
+			t0 := time.Now()
+
+			defer func(t0 time.Time) {
+				elapsed := time.Since(t0)
+				m.metrics.getPayloadTime.WithLabelValues(
+					relay.String(),
+					"deneb",
+				).Observe(float64(elapsed))
+			}(t0)
+
 			url := relay.GetURI(pathGetPayload)
 			log := log.WithField("url", url)
 			log.Debug("calling getPayload")
@@ -718,6 +776,7 @@ func (m *BoostService) processDenebPayload(w http.ResponseWriter, req *http.Requ
 				if errors.Is(requestCtx.Err(), context.Canceled) {
 					log.Info("request was cancelled") // this is expected, if payload has already been received by another relay
 				} else {
+					m.metrics.failedGetPayload.WithLabelValues(relay.String(), "deneb").Inc()
 					log.WithError(err).Error("error making request to relay")
 				}
 				return

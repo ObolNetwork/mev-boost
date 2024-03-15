@@ -71,6 +71,9 @@ var (
 	relayMinBidEth   = flag.Float64("min-bid", defaultRelayMinBidEth, "minimum bid to accept from a relay [eth]")
 	relayMonitorURLs = flag.String("relay-monitors", defaultRelayMonitors, "relay monitor urls - single entry or comma-separated list (scheme://host)")
 
+	promPath     = flag.String("prometheus-path", "/metrics", "Path on which mev-boost will serve Prometheus metrics.")
+	promBindAddr = flag.String("prometheus-address", "127.0.0.1:2112", `Bind address in the "IP Address:port" format on which Prometheus metrics will be served.`)
+
 	relayTimeoutMsGetHeader  = flag.Int("request-timeout-getheader", defaultTimeoutMsGetHeader, "timeout for getHeader requests to the relay [ms]")
 	relayTimeoutMsGetPayload = flag.Int("request-timeout-getpayload", defaultTimeoutMsGetPayload, "timeout for getPayload requests to the relay [ms]")
 	relayTimeoutMsRegVal     = flag.Int("request-timeout-regval", defaultTimeoutMsRegisterValidator, "timeout for registerValidator requests [ms]")
@@ -200,6 +203,8 @@ func Main() {
 		GenesisTime:              genesisTime,
 		RelayCheck:               *relayCheck,
 		RelayMinBid:              *relayMinBidWei,
+		PromPath:                 *promPath,
+		PromBindAddr:             *promBindAddr,
 		RequestTimeoutGetHeader:  time.Duration(*relayTimeoutMsGetHeader) * time.Millisecond,
 		RequestTimeoutGetPayload: time.Duration(*relayTimeoutMsGetPayload) * time.Millisecond,
 		RequestTimeoutRegVal:     time.Duration(*relayTimeoutMsRegVal) * time.Millisecond,
